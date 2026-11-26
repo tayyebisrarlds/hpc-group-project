@@ -125,11 +125,6 @@ int main(int argc, char* argv[]) {
     int* row_counts = malloc(size * sizeof(int));
     int* first =
         malloc(size * sizeof(int)); // first is first element for each scatter row
-    int* A_per_rank = malloc(
-        size *
-        sizeof(
-            int)); // for each 'rank' in MPI, the number of elements to operate on
-    int* A_first = malloc(size * sizeof(int)); // first place to iterate from
 
     for (int current_row = 0, current_distributed = 0; current_row < size;
         ++current_row) {
@@ -140,33 +135,22 @@ int main(int argc, char* argv[]) {
 
         first[current_row] = current_distributed; // assigns first index to be used
         // for that distributed process
-        A_per_rank[current_row] =
-            row_counts[current_row] * n; // number of things to operate on
-        A_first[current_row] = first[current_row] * n; // first in A
 
-        current_distributed =
-            current_distributed + row_counts[current_row]; // go to the next unused
+        current_distributed = current_distributed + row_counts[current_row]; // go to the next unused
     }
 
     int local_n = row_counts[rank];
     int offset = first[rank];
 
-    double* A = NULL;
-    double* b = NULL;
     double* x = calloc(n, sizeof(double));
     double* local_A =
         malloc((size_t)(local_n > 0 ? local_n : 1) * n * sizeof(double));
     double* local_b =
         malloc((size_t)(local_n > 0 ? local_n : 1) * sizeof(double));
 
-    if (rank == 0) { // the 'main' process gets all of A and all of b
-        A = calloc((size_t)n * n, sizeof(double));
-        b = calloc(n, sizeof(double));
-    }
-
     // checking valididity
 
-    int safe = x && local_A && local_b && (rank != 0 || (A && b));
+    int safe = x && local_A && local_b;
     // all exist
     if (!safe) {
         fprintf(stderr, "Rank %d: memory allocation failed.\n", rank);
@@ -177,18 +161,10 @@ int main(int argc, char* argv[]) {
     MPI_Barrier(MPI_COMM_WORLD);
     double start_time = MPI_Wtime();
 
-    // first process generates
-    if (rank == 0)
-        generate_system(A, b, n, 0, margin);
+    unsigned int seed = 12345;
 
-    // actually scatter the data
-    MPI_Scatterv(A, A_per_rank, A_first, MPI_DOUBLE, local_A, local_n * n,
-        MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Scatterv(b, row_counts, first, MPI_DOUBLE, local_b, local_n, MPI_DOUBLE,
-        0, MPI_COMM_WORLD);
+    generate_system(local_A, local_b, n, seed,  margin, offset, local_n);
 
-    free(A); // deallocate
-    free(b);
 
     double tolerance = 1e-10;
     int max_iter = 500;
@@ -211,8 +187,6 @@ int main(int argc, char* argv[]) {
     free(x);
     free(row_counts);
     free(first);
-    free(A_per_rank);
-    free(A_first);
 
     MPI_Finalize();
     return 0;
